@@ -45,8 +45,8 @@ class Env():
         if nodes is not None:
             for node in nodes:
                 for outgoing in node.outgoing:
-                    xs = np.linspace(node.coord[0, 0], outgoing.coord[0,0], 100)
-                    ys = np.linspace(node.coord[0,1], outgoing.coord[0, 1], 100)
+                    xs = np.linspace(node.coord[0, 0], outgoing.dest.coord[0,0], 100)
+                    ys = np.linspace(node.coord[0,1], outgoing.dest.coord[0, 1], 100)
                     cost = np.zeros((100,))
                     line = np.stack((xs, ys, cost)).T # 100 x 2
                     
@@ -87,8 +87,8 @@ class Env():
         if nodes is not None:
             for node in nodes:
                 for outgoing in node.outgoing:
-                    xs = np.linspace(node.coord[0, 0], outgoing.coord[0,0], 100)
-                    ys = np.linspace(node.coord[0,1], outgoing.coord[0, 1], 100)
+                    xs = np.linspace(node.coord[0, 0], outgoing.dest.coord[0,0], 100)
+                    ys = np.linspace(node.coord[0,1], outgoing.dest.coord[0, 1], 100)
                     # cost = np.zeros((100,))
                     line = np.stack((xs, ys)).T # 100 x 2
                     
@@ -119,15 +119,56 @@ class Node():
     
     def __eq__(self, other):
         return np.allclose(self.coord, other.coord)
+
+class Edge():
+    def __init__(self, source, dest):
+        self.source = source
+        self.dest = dest
+        self.alpha = 0
+
+    def length_cost(self, jacobian = False):
+        delta = self.dest.coord - self.source.coord
+        length = np.linalg.norm(delta)
+        if jacobian:
+            C = np.concatenate((delta, -delta), axis = 1) / length
+            return length, C
+        
+        return length
     
+    def getCost(self, env):
+        start = self.source.coord
+        end = self.dest.coord
+        s = np.concatenate((end, start), axis = 1)
+        J = np.zeros((1, 4))
+        obs_cost = 0
+        for obstacle in env.obstacle_centers:
+            integral, L = obstacle.integral(start, end, True)
+            # system is L(x_2, x_1) ~= L([x2, x1] - [x20, x10]) + integral 
+            # = L[x2, x1] + integral - L[x20, x10] 
+            obs_cost += integral
+            J += L
+            # system is aw
+
+        leng, C = self.length_cost(True)
+
+        return obs_cost, J, leng, C
+
+'''
+Constructs a directed acyclic graph from start to end
+We choose a diamond shaped graph for simplicity. In actuality it does not matter
+how the graph is constructed, as long as we can extract paths from start to
+finish.
+'''
 def construct_graph(depth, start_node, goal_node, env):
+
+    FANOUT_ANGLE = np.pi / 4 # determines how wide the graph fans out to the sides
     travel_vector = goal_node.coord - start_node.coord
     travel_magnitude = np.linalg.norm(travel_vector)
-    edge_len = travel_magnitude / (2 * depth) * np.sqrt(2) # length of the edges
+    edge_len = travel_magnitude / (2 * depth) / np.cos(FANOUT_ANGLE) # length of the edges
     travel_angle = np.arctan2(travel_vector[0, 1], travel_vector[0, 0])
-    left_angle = travel_angle + np.pi / 4
+    left_angle = travel_angle + FANOUT_ANGLE
     left_vector = np.array([np.cos(left_angle), np.sin(left_angle)]) * edge_len
-    right_angle = left_angle - np.pi / 2
+    right_angle = travel_angle - FANOUT_ANGLE
     right_vector = np.array([np.cos(right_angle), np.sin(right_angle)]) * edge_len
     
     # All nodes
@@ -145,22 +186,22 @@ def construct_graph(depth, start_node, goal_node, env):
                 # add left node
                 left_coord = old_coord + left_vector
                 left = Node(left_coord[0, 0], left_coord[0, 1], len(nodes) - 1)
-                # edge = Edge(node, left)
-                left.add_incoming(node)
-                node.add_outgoing(left)
+                left_edge = Edge(node, left)
+                left.add_incoming(left_edge)
+                node.add_outgoing(left_edge)
                 new_frontier.append(left)
                 nodes.append(left)
             else:
-                # edge = Edge(node, old_left)
-                old_left.add_incoming(node)
-                node.add_outgoing(old_left)
+                edge = Edge(node, old_left)
+                old_left.add_incoming(edge)
+                node.add_outgoing(edge)
 
             # add right node
             right_coord = old_coord + right_vector
             right = Node(right_coord[0, 0], right_coord[0, 1], len(nodes) - 1)
-            # edge = Edge(node, right)
-            right.add_incoming(node)
-            node.add_outgoing(right)
+            right_edge = Edge(node, right)
+            right.add_incoming(right_edge)
+            node.add_outgoing(right_edge)
             new_frontier.append(right)
 
             nodes.append(right) # track the nodes
@@ -184,16 +225,16 @@ def construct_graph(depth, start_node, goal_node, env):
                     right_coord = old_coord + right_vector
                     right = Node(right_coord[0, 0], right_coord[0, 1], len(nodes) - 1)
                     nodes.append(right)
-                # edge = Edge(node, right)
-                right.add_incoming(node)
-                node.add_outgoing(right)
+                right_edge = Edge(node, right)
+                right.add_incoming(right_edge)
+                node.add_outgoing(right_edge)
                 new_frontier.append(right)
 
             # Connect left node
             if i != 0:
-                # edge = Edge(node, old_left)
-                old_left.add_incoming(node)
-                node.add_outgoing(old_left)
+                left_edge = Edge(node, old_left)
+                old_left.add_incoming(left_edge)
+                node.add_outgoing(left_edge)
 
             old_left = right
 
@@ -212,15 +253,30 @@ Exhaustively finds all paths in the grid
 def search(start, goal):
     frontier = [[start]]
     paths = []
+
+    '''
+    Format of the search:
+    each path on the frontier will be:
+    [edge, edge, ..., edge, node]
+    It begins with a variable number of edges, followed by the node that the 
+    final edge points to
+    The edges are the series of edges to walk down to reach the current node
+    from the start node
+    When the path exits search, it must contain only edges
+    '''
     while len(frontier) > 0:
         path = frontier.pop()
         node = path[-1]
         for outgoing in node.outgoing:
-            new_path = copy.copy(path)
+            new_path = copy.copy(path[:-1]) # exclude the node, keep the edges
+            # shallow copy: each path is a list of pointers to edges. 
+            # We are okay with aliasing, because we do not modify the underlying edge data structure
             new_path.append(outgoing)
-            if outgoing == goal:
+            # print(f"Destination is: {outgoing}")
+            if outgoing.dest == goal:
                 paths.append(new_path)
             else:
+                new_path.append(outgoing.dest)
                 frontier.append(new_path)
     return paths
 

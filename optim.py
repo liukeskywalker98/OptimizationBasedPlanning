@@ -1,6 +1,12 @@
 '''
 optim.py
 Optimization code
+Runs Levenberg-Marquadt on a least squares problem for the total environmental 
+and travel cost for all paths
+
+TODO:
+add in edge weights for edge optimization
+add in edge weight optimization
 '''
 import matplotlib.pyplot as plt
 import numpy as np
@@ -76,17 +82,13 @@ def levenberg_marquadt(node_positions, A, b, nodes, paths, env, path_costs):
         new_path_costs = np.zeros((path_count * 2))
         # Traverse each path
         for p, path in enumerate(paths):
-            for i in range(1, len(path)):
-                start = path[i - 1]
-                end = path[i]
-                start_id = start.id
-                end_id = end.id
+            for i in range(len(path)):
+                edge = path[i]
+                start = edge.source
+                end = edge.dest
                 
                 obs_cost, J, leng, C = getCost(start, end, env)
                 
-                # Edge weight
-
-
                 new_path_costs[p * 2] += obs_cost
                 new_path_costs[p * 2 + 1] += leng
 
@@ -123,25 +125,25 @@ def solve(start_node, goal_node, env, depth = 1):
         node_positions = get_node_positions(nodes)
         # Traverse each path
         for p, path in enumerate(paths):
-            for i in range(1, len(path)):
-                start = path[i - 1]
-                end = path[i]
+            for i in range(len(path)):
+                edge = path[i]
+                start = edge.source
+                end = edge.dest
                 start_id = start.id
                 end_id = end.id
                 
-                obs_cost, J, leng, C = getCost(start, end, env)
+                obs_cost, J, leng, C = edge.getCost(env)
+
+                # Edge weight
                 
-                # if start_id == 2 or start_id == 4:
-                #     print(f"ID {start_id} had Jacobian {J[0, 2:]}")
-                # if end_id == 2 or end_id == 4:
-                #     print(f"ID {end_id} had Jacobian {J[0, :2]}")
-                # For each edge, build the matrix
+
                 if start_id >= 0:
                     A[p * 2, start_id * 2: start_id * 2 + 2] +=  J[0, 2:]
                     A[p * 2 + 1, start_id * 2: start_id * 2 + 2] +=  C[0, 2:]
                 if end_id >= 0:
                     A[p * 2, end_id * 2: end_id * 2 + 2] +=  J[0, :2]
                     A[p * 2 + 1, end_id * 2: end_id * 2 + 2] +=  C[0, :2]
+
 
                 b[p * 2] -= obs_cost
                 b[p * 2 + 1] -= leng
