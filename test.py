@@ -45,8 +45,9 @@ if __name__ == '__main__':
     obs1 = RadialBarrierObstacle(1.5, 1.5, 1e-4) # 1/ x
     obs2 = RadialBarrierObstacle(1.25, 1.25, weight=1e-4) 
     env.add_obstacle(obs1)
-    env.render3D()
+    
     env.add_obstacle(obs2)
+    env.render2D()
     # env.render()
     test_integral()
 

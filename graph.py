@@ -55,6 +55,48 @@ class Env():
                     line[:, 2][line[:, 2] > 100] = 100
                     ax.plot(line[:, 0], line[:, 1], line[:, 2] + 3, 'r', linewidth= 4, alpha = 1, zorder =2)
 
+        plt.show()
+
+    def render2D(self, nodes = None):
+        fig, ax = plt.subplots()
+        ax.set_xlim(0, self.x_bound)
+        ax.set_ylim(0, self.y_bound)
+        X = np.linspace(0, self.x_bound, self.epsilon, endpoint = False)
+        Y = np.linspace(0, self.y_bound, self.epsilon, endpoint = False)
+
+        X, Y = np.meshgrid(X, Y)
+        # Z = np.zeros(X.shape)
+
+        # Add the cost from all obstacles
+        # coords = np.stack((X, Y)).transpose(1, 2, 0) # 2 x H x W
+        # for obstacle in self.obstacle_centers:
+        #     Z += obstacle.cost(coords)
+        obs = np.array([obstacle.center for obstacle in self.obstacle_centers]) # N x 2
+        plt.scatter(obs[:, 0], obs[:, 1], c='b')
+
+        # Clip infinities so that plt does not squash smaller values
+        # inf = np.isinf(Z)
+        # too_big = Z > INF
+        # clip_index = np.logical_or(inf, too_big)
+
+        # Z[clip_index] = INF
+
+        # surf = ax.plot_surface(X, Y, Z, zorder = 1)
+        # fig.colorbar(surf, shrink=0.5, aspect=5)
+
+        if nodes is not None:
+            for node in nodes:
+                for outgoing in node.outgoing:
+                    xs = np.linspace(node.coord[0, 0], outgoing.coord[0,0], 100)
+                    ys = np.linspace(node.coord[0,1], outgoing.coord[0, 1], 100)
+                    # cost = np.zeros((100,))
+                    line = np.stack((xs, ys)).T # 100 x 2
+                    
+                    # for obstacle in self.obstacle_centers:
+                        # line[:, 2] += obstacle.cost(line[:, :2])
+                    # line[:, 2][line[:, 2] > 100] = 100
+                    ax.plot(line[:, 0], line[:, 1], 'r', linewidth= 1)
+
         plt.show() 
 
 class Node():

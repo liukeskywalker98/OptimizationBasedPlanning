@@ -73,7 +73,7 @@ def levenberg_marquadt(node_positions, A, b, nodes, paths, env, path_costs):
         print(node_positions)
         print(dx)
         commit(node_positions + dx, nodes)
-        new_path_costs = np.zeros((path_count))
+        new_path_costs = np.zeros((path_count * 2))
         # Traverse each path
         for p, path in enumerate(paths):
             for i in range(1, len(path)):
@@ -82,12 +82,13 @@ def levenberg_marquadt(node_positions, A, b, nodes, paths, env, path_costs):
                 start_id = start.id
                 end_id = end.id
                 
-                cost, J = getCost(start, end, env)
+                obs_cost, J, leng, C = getCost(start, end, env)
                 
                 # Edge weight
-            
 
-                new_path_costs[p] += cost
+
+                new_path_costs[p * 2] += obs_cost
+                new_path_costs[p * 2 + 1] += leng
 
         if np.linalg.norm(new_path_costs) < np.linalg.norm(path_costs):
             lm_worked = True
@@ -105,7 +106,7 @@ def solve(start_node, goal_node, env, depth = 1):
     # Find total number of paths
     nodes = construct_graph(depth, start_node, goal_node, env)
     paths = search(start_node, goal_node)
-    env.render(nodes)
+    env.render3D(nodes)
     node_count = len(nodes) - 2 # excludes start and goal. Remember to index from 1 and terminate before len - 1
     path_count = len(paths)
 
@@ -115,9 +116,9 @@ def solve(start_node, goal_node, env, depth = 1):
     while not converged and iters < max_iters:
         print(f"Optimization Iteration {iters}")
         
-        A = np.zeros((path_count, node_count * 2))
-        b = np.zeros((path_count))
-        path_costs = np.zeros((path_count))
+        A = np.zeros((path_count * 2, node_count * 2))
+        b = np.zeros((path_count * 2))
+        path_costs = np.zeros((path_count * 2))
     
         node_positions = get_node_positions(nodes)
         # Traverse each path
@@ -128,7 +129,7 @@ def solve(start_node, goal_node, env, depth = 1):
                 start_id = start.id
                 end_id = end.id
                 
-                cost, J = getCost(start, end, env)
+                obs_cost, J, leng, C = getCost(start, end, env)
                 
                 # if start_id == 2 or start_id == 4:
                 #     print(f"ID {start_id} had Jacobian {J[0, 2:]}")
@@ -136,13 +137,17 @@ def solve(start_node, goal_node, env, depth = 1):
                 #     print(f"ID {end_id} had Jacobian {J[0, :2]}")
                 # For each edge, build the matrix
                 if start_id >= 0:
-                    A[p, start_id * 2: start_id * 2 + 2] +=  J[0, 2:]
+                    A[p * 2, start_id * 2: start_id * 2 + 2] +=  J[0, 2:]
+                    A[p * 2 + 1, start_id * 2: start_id * 2 + 2] +=  C[0, 2:]
                 if end_id >= 0:
-                    A[p, end_id * 2: end_id * 2 + 2] +=  J[0, :2]
-                b[p] -= cost
+                    A[p * 2, end_id * 2: end_id * 2 + 2] +=  J[0, :2]
+                    A[p * 2 + 1, end_id * 2: end_id * 2 + 2] +=  C[0, :2]
 
+                b[p * 2] -= obs_cost
+                b[p * 2 + 1] -= leng
                 # For debugging
-                path_costs[p] += cost
+                path_costs[p * 2] += obs_cost
+                path_costs[p * 2 + 1] += leng
 
         print("Least squares problem constructed:")
         print(A)
@@ -151,7 +156,7 @@ def solve(start_node, goal_node, env, depth = 1):
         levenberg_marquadt(node_positions, A, b, nodes, paths, env, path_costs)
         
         # Record the solution, commit the solution to the nodes
-        env.render(nodes)
+        env.render2D(nodes)
         iters += 1
     return
 
@@ -163,17 +168,15 @@ def getCost(start, end, env):
     end = end.coord
     s = np.concatenate((end, start), axis = 1)
     J = np.zeros((1, 4))
-    cost = 0
+    obs_cost = 0
     for obstacle in env.obstacle_centers:
         integral, L = obstacle.integral(start, end, True)
         # system is L(x_2, x_1) ~= L([x2, x1] - [x20, x10]) + integral 
         # = L[x2, x1] + integral - L[x20, x10] 
-        cost += integral
+        obs_cost += integral
         J += L
         # system is aw
 
     leng, C = length(start, end, True)
-    cost += leng
-    J += C
 
-    return cost, J
+    return obs_cost, J, leng, C
