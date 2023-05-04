@@ -72,7 +72,8 @@ class Env():
         # for obstacle in self.obstacle_centers:
         #     Z += obstacle.cost(coords)
         obs = np.array([obstacle.center for obstacle in self.obstacle_centers]) # N x 2
-        plt.scatter(obs[:, 0], obs[:, 1], c='b')
+        if len(self.obstacle_centers):
+            plt.scatter(obs[:, 0], obs[:, 1], c='b')
 
         # Clip infinities so that plt does not squash smaller values
         # inf = np.isinf(Z)
@@ -95,8 +96,17 @@ class Env():
                     # for obstacle in self.obstacle_centers:
                         # line[:, 2] += obstacle.cost(line[:, :2])
                     # line[:, 2][line[:, 2] > 100] = 100
-                    ax.plot(line[:, 0], line[:, 1], 'r', linewidth= 1)
+                    edge_weight = outgoing.weight
+                    line_weight = max(0.5, edge_weight * 5)
 
+                    env_cost, _, path_cost, _ = outgoing.getCost(self)
+                    total_sq_cost = env_cost**2 + path_cost**2
+                    # print(total_sq_cost.shape)
+                    label = f"{edge_weight:.04f}, {total_sq_cost:.04f}"
+                    ax.annotate(label, ((xs[-1] + xs[0])/2, (ys[-1] + ys[0])/2), textcoords = "offset points", xytext=(0,0), ha='center')
+
+                    ax.plot(line[:, 0], line[:, 1], 'r', linewidth= line_weight)
+        ax.axis('equal')
         plt.show() 
 
 class Node():
@@ -121,10 +131,11 @@ class Node():
         return np.allclose(self.coord, other.coord)
 
 class Edge():
-    def __init__(self, source, dest):
+    def __init__(self, source, dest, id):
         self.source = source
         self.dest = dest
         self.alpha = 0
+        self.id = id
 
     def length_cost(self, jacobian = False):
         delta = self.dest.coord - self.source.coord
@@ -145,7 +156,7 @@ class Edge():
             integral, L = obstacle.integral(start, end, True)
             # system is L(x_2, x_1) ~= L([x2, x1] - [x20, x10]) + integral 
             # = L[x2, x1] + integral - L[x20, x10] 
-            obs_cost += integral
+            obs_cost += integral[0,0]
             J += L
             # system is aw
 
@@ -171,8 +182,9 @@ def construct_graph(depth, start_node, goal_node, env):
     right_angle = travel_angle - FANOUT_ANGLE
     right_vector = np.array([np.cos(right_angle), np.sin(right_angle)]) * edge_len
     
-    # All nodes
+    # Store nodes for easy access during optimization
     nodes = [start_node]
+    edges = []
 
     # expansionary set
     frontier = [start_node] # set of nodes that must grow new edges
@@ -186,24 +198,27 @@ def construct_graph(depth, start_node, goal_node, env):
                 # add left node
                 left_coord = old_coord + left_vector
                 left = Node(left_coord[0, 0], left_coord[0, 1], len(nodes) - 1)
-                left_edge = Edge(node, left)
+                left_edge = Edge(node, left, len(edges))
                 left.add_incoming(left_edge)
                 node.add_outgoing(left_edge)
                 new_frontier.append(left)
                 nodes.append(left)
+                edges.append(left_edge)
             else:
-                edge = Edge(node, old_left)
+                edge = Edge(node, old_left, len(edges))
                 old_left.add_incoming(edge)
                 node.add_outgoing(edge)
+                edges.append(left_edge)
 
             # add right node
             right_coord = old_coord + right_vector
             right = Node(right_coord[0, 0], right_coord[0, 1], len(nodes) - 1)
-            right_edge = Edge(node, right)
+            right_edge = Edge(node, right, len(edges))
             right.add_incoming(right_edge)
             node.add_outgoing(right_edge)
             new_frontier.append(right)
-
+            
+            edges.append(right_edge)
             nodes.append(right) # track the nodes
 
             old_left = right
@@ -225,16 +240,19 @@ def construct_graph(depth, start_node, goal_node, env):
                     right_coord = old_coord + right_vector
                     right = Node(right_coord[0, 0], right_coord[0, 1], len(nodes) - 1)
                     nodes.append(right)
-                right_edge = Edge(node, right)
+                right_edge = Edge(node, right, len(edges))
                 right.add_incoming(right_edge)
                 node.add_outgoing(right_edge)
                 new_frontier.append(right)
+                edges.append(right_edge)
+
 
             # Connect left node
             if i != 0:
-                left_edge = Edge(node, old_left)
+                left_edge = Edge(node, old_left, len(edges))
                 old_left.add_incoming(left_edge)
                 node.add_outgoing(left_edge)
+                edges.append(left_edge)
 
             old_left = right
 
@@ -246,7 +264,7 @@ def construct_graph(depth, start_node, goal_node, env):
         for obstacle in env.obstacle_centers:
             if np.allclose(node.coord[0], obstacle.center):
                 node.coord += 1e-3
-    return nodes
+    return nodes, edges
 '''
 Exhaustively finds all paths in the grid
 '''
@@ -274,6 +292,7 @@ def search(start, goal):
             new_path.append(outgoing)
             # print(f"Destination is: {outgoing}")
             if outgoing.dest == goal:
+                print(len(new_path))
                 paths.append(new_path)
             else:
                 new_path.append(outgoing.dest)
@@ -286,6 +305,19 @@ def commit(node_positions, nodes):
         assert nodes[i + 1].id >= 0 
         nodes[i + 1].coord = np.expand_dims(node_positions[i*2: i*2 + 2], axis = 0)
         # print(i)
+
+def commit_weights(new_alphas, edges, nodes):
+    for i in range(len(edges)):
+        edges[i].alpha = new_alphas[i]
+    for node in nodes:
+        for i, edge in enumerate(node.incoming):
+            node.incoming_weights[i] = edge.alpha
+
+def get_edge_alphas(edges):
+    alphas = np.zeros(len(edges))
+    for i, edge in enumerate(edges):
+        alphas[i] = edge.alpha
+    return alphas
 
 def get_node_positions(nodes):
     positions = np.zeros((len(nodes) * 2 - 4,))

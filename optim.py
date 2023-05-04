@@ -59,6 +59,22 @@ def test_integral():
     print(f"Numerical jacobian: {approx_L}")
     print(f"Analytical jacobian: {L[0]}")
 
+'''
+This function uses the log sum exp trick to provide more numerical stability to
+the computation of the softmax.
+Inputs:
+    alpha_i - exponent of the numerator term
+    alpha   - array of exponents for the denominator term
+
+Outputs:
+    float value in [0, 1] representing edge weight
+'''
+def stable_softmax(alpha_i, alpha):
+    common_factor = np.amin(alpha) # gaurds underflow
+    stable_denom_exp = alpha - common_factor
+    stable_numer_exp = alpha_i - common_factor
+    return np.exp(stable_numer_exp) / np.sum(np.exp(stable_denom_exp))
+
 def levenberg_marquadt(node_positions, A, b, nodes, paths, env, path_costs):
     # Minimize the matrix - Levenberg-Marquadt Optimizer
     print("Optimizing with LM")
@@ -66,33 +82,38 @@ def levenberg_marquadt(node_positions, A, b, nodes, paths, env, path_costs):
 
     lm_worked = False
     lamda = 1
-    max_lm_iters = 6
+    max_lm_iters = 9
     lm_iters = 0
+    delta = 0
+    EPSILON = 1e-6
     while not lm_worked and lm_iters < max_lm_iters:
         # (A^T A + lamda diag(A^T A) dx = A^T b)
         ATA = A.T @ A
         ATb = A.T @ b
         LM = ATA + lamda * np.diag(np.diag(ATA))#np.eye(ATA.shape[0])
-        dx = np.linalg.inv(LM) @ ATb
+        LM_inv = np.linalg.inv(LM)
+        print(f"ATA inv: {LM_inv}")
+        dx = LM_inv @ ATb
 
         # Check convergence
-        print(node_positions)
-        print(dx)
+        # print(node_positions)
+        # print(dx)
         commit(node_positions + dx, nodes)
         new_path_costs = np.zeros((path_count * 2))
         # Traverse each path
         for p, path in enumerate(paths):
             for i in range(len(path)):
                 edge = path[i]
-                start = edge.source
-                end = edge.dest
                 
-                obs_cost, J, leng, C = getCost(start, end, env)
-                
+                obs_cost, _, leng, _ = edge.getCost(env)
+                weight = np.sqrt(edge.weight)
+                obs_cost *= weight
+                leng *= weight
+
                 new_path_costs[p * 2] += obs_cost
                 new_path_costs[p * 2 + 1] += leng
-
-        if np.linalg.norm(new_path_costs) < np.linalg.norm(path_costs):
+        delta = np.linalg.norm(new_path_costs) - np.linalg.norm(path_costs)
+        if delta < 0:
             lm_worked = True
             lamda /= 2
             print(f"LM increasing trust region. Lambda: {lamda}")
@@ -100,27 +121,47 @@ def levenberg_marquadt(node_positions, A, b, nodes, paths, env, path_costs):
             lamda *= 5
             print(f"LM reducing trust region. Trying again. Lambda: {lamda}")
         lm_iters += 1
+    print(delta)
+    return delta > -EPSILON
+
+def weight_GD():
     pass
+
 '''
-Want to minimize the travel cost and environmental cost
+USED FOR TESTING ONLY
+Minimize the travel cost and environmental cost for all paths in a least square
+sense. 
+
+ISSUE LOG:
+There are serious convergence issues with the Levenberg-Marquadt solver. The 
 '''
 def solve(start_node, goal_node, env, depth = 1):
     # Find total number of paths
-    nodes = construct_graph(depth, start_node, goal_node, env)
+    nodes, edges = construct_graph(depth, start_node, goal_node, env)
     paths = search(start_node, goal_node)
-    env.render3D(nodes)
+    # env.render3D(nodes)
     node_count = len(nodes) - 2 # excludes start and goal. Remember to index from 1 and terminate before len - 1
     path_count = len(paths)
+    edge_count = len(edges)
 
     converged = False
-    max_iters = 10
+    max_iters = 20
     iters = 0
     while not converged and iters < max_iters:
         print(f"Optimization Iteration {iters}")
+        cost_ndim = path_count * 2
+        if len(env.obstacle_centers) == 0:
+            cost_ndim = path_count 
         
-        A = np.zeros((path_count * 2, node_count * 2))
-        b = np.zeros((path_count * 2))
-        path_costs = np.zeros((path_count * 2))
+        A = np.zeros((cost_ndim, node_count * 2))
+        dAda = np.zeros((edge_count, cost_ndim, node_count * 2))
+        b = np.zeros((cost_ndim))
+        dbda = np.zeros((edge_count, cost_ndim))
+        path_costs = np.zeros((cost_ndim))
+
+        # dL/da - Jacobian of loss wrt weight parameter vector a
+        D = np.zeros((cost_ndim, edge_count))
+        e = np.zeros((cost_ndim,))
     
         node_positions = get_node_positions(nodes)
         # Traverse each path
@@ -131,35 +172,291 @@ def solve(start_node, goal_node, env, depth = 1):
                 end = edge.dest
                 start_id = start.id
                 end_id = end.id
+                edge_id = edge.id
                 
                 obs_cost, J, leng, C = edge.getCost(env)
 
                 # Edge weight
-                
+                alpha_i = edge.alpha
+                alpha = np.array(end.incoming_weights)
+                weight = stable_softmax(alpha_i, alpha)
+                edge.weight = weight
+                print(f"As a reminder: weight is {weight}")
+                weight = np.sqrt(weight)
 
+                assert 0 <= weight and weight <= 1, f"Softmax weight incorrect: {weight}"
+                # J *= weight
+                # C *= weight
+                # obs_cost *= weight
+                # leng *= weight
+                dim_delta = 1
+                dim_step = 2
+                if len(env.obstacle_centers) == 0:
+                    dim_delta = 0
+                    dim_step = 1
                 if start_id >= 0:
-                    A[p * 2, start_id * 2: start_id * 2 + 2] +=  J[0, 2:]
-                    A[p * 2 + 1, start_id * 2: start_id * 2 + 2] +=  C[0, 2:]
+                    A[p * dim_step, start_id * 2: start_id * 2 + 2] +=  J[0, 2:] / weight
+                    A[p * dim_step + dim_delta, start_id * 2: start_id * 2 + 2] +=  C[0, 2:] / weight
+                    dAda[edge_id, p * dim_step, start_id * 2: start_id * 2 + 2] += J[0, 2:]
+                    dAda[edge_id, p * dim_step + dim_delta, start_id * 2: start_id * 2 + 2] += C[0, 2:]
                 if end_id >= 0:
-                    A[p * 2, end_id * 2: end_id * 2 + 2] +=  J[0, :2]
-                    A[p * 2 + 1, end_id * 2: end_id * 2 + 2] +=  C[0, :2]
+                    A[p * dim_step, end_id * 2: end_id * 2 + 2] +=  J[0, :2] / weight
+                    A[p * dim_step + dim_delta, end_id * 2: end_id * 2 + 2] +=  C[0, :2] / weight
+                    dAda[edge_id, p * dim_step, end_id * 2: end_id * 2 + 2] += J[0, :2]
+                    dAda[edge_id, p * dim_step + dim_delta, end_id * 2: end_id * 2 + 2] += C[0, :2]
 
+                print(f"Obs cost: {obs_cost}, Length: {leng}")
+                b[p * dim_step] -= obs_cost / weight
+                b[p * dim_step + dim_delta] -= leng / weight
+                dbda[edge_id, p * dim_step] -= obs_cost
+                dbda[edge_id, p * dim_step + dim_delta] -= leng
 
-                b[p * 2] -= obs_cost
-                b[p * 2 + 1] -= leng
-                # For debugging
-                path_costs[p * 2] += obs_cost
-                path_costs[p * 2 + 1] += leng
+                path_costs[p * dim_step] += obs_cost * weight
+                path_costs[p * dim_step + dim_delta] += leng * weight
 
         print("Least squares problem constructed:")
-        print(A)
+        # print(A)
         # print(f"ATA: {A.T @ A}")
+        print(f"ATb: {A.T @ b}")
         # print(b)
-        levenberg_marquadt(node_positions, A, b, nodes, paths, env, path_costs)
+        converged = levenberg_marquadt(node_positions, A, b, nodes, paths, env, path_costs)
+        # env.render2D(nodes)
+
+        # old_A = np.copy(A)
+        # old_b = np.copy(b)
+        # # Weight Parameter Optimization
+        # # Construct dloss/dweight
+        # for p, path in enumerate(paths):
+        #     for i in range(len(path)):
+        #         edge = path[i]
+        #         end = edge.dest
+        #         edge_id = edge.id
+        #         start_id = start.id
+        #         end_id = end.id
+                
+        #         obs_cost, J, leng, C = edge.getCost(env)
+
+        #         weight = edge.weight
+
+        #         assert 0 <= weight and weight <= 1, f"Softmax weight incorrect: {weight}"
+
+        #         if start_id >= 0:
+        #             A[p * 2, start_id * 2: start_id * 2 + 2] +=  J[0, 2:] * weight
+        #             A[p * 2 + 1, start_id * 2: start_id * 2 + 2] +=  C[0, 2:] * weight
+        #         if end_id >= 0:
+        #             A[p * 2, end_id * 2: end_id * 2 + 2] +=  J[0, :2] * weight
+        #             A[p * 2 + 1, end_id * 2: end_id * 2 + 2] +=  C[0, :2] * weight
+
+        #         b[p * 2] -= obs_cost * weight
+        #         b[p * 2 + 1] -= leng * weight
+
+        #         D[2 * p, edge_id] += obs_cost
+        #         D[2 * p + 1, edge_id] += leng
+                
+        #         e[2 * p] += obs_cost * weight
+        #         e[2 * p + 1] += leng * weight
+
+        # S = np.zeros((edge_count, edge_count))
         
+        # # Construct dweight/dalpha AKA softmax Jacobian
+        # for node in nodes:
+        #     incoming_weights = node.incoming_weights
+        #     if len(incoming_weights) == 0:
+        #         continue
+        #     edge_ids = np.array([edge.id for edge in node.incoming])
+        #     softmax = stable_softmax(incoming_weights, incoming_weights)
+
+        #     ndim = softmax.shape[0]
+        #     softmax_matrix = np.tile(softmax, (ndim, 1))
+        #     dweight_da = softmax_matrix * (np.eye(ndim) - softmax_matrix.T)
+        #     r, c = np.meshgrid(edge_ids, edge_ids)
+        #     S[r, c] += dweight_da
+        
+        # LR = 1e-2
+        # # dloss/dweight * dweight/dalpha
+        # dL_da_w_prime = D.T @ e # E x 1
+
+        # dATA_da = dAda.transpose(0, 2, 1) @ old_A + old_A.T @ dAda # (E x N*2 x P*2), (P*2 x N*2) + (N*2 x P*2) (E x P*2 x N*2) = (E x N*2 x N*2)
+        # ATA = old_A.T @ old_A # (N*2 x N*2)
+        # ATA_inv = np.linalg.inv(ATA) # (N*2 x N*2)
+        # dATA_inv_da = -ATA_inv @ dATA_da @ ATA_inv # (N*2 x N*2), (E x N*2 x N*2), (N*2 x N*2) = (E x N*2 x N*2)
+        # ATb = old_A.T @ old_b # (N*2 x P*2), (P*2, 1) = (N*2 x 1)
+        # dAb_da = dAda.transpose(0, 2, 1) @ old_b + old_A.T @ np.expand_dims(dbda, axis = 2) # (E x N*2 x P*2), (P*2 x 1) + (N*2 x P*2), (E x P*2 x 1) = (E x N*2 x 1)
+        # ddelta_dweight = dATA_inv_da @ ATb + ATA @ dAb_da # (E x N*2 x N*2), (N*2 x 1) + (N*2 x N*2) (E x N*2 x 1) = (E x N*2 x 1)
+
+        # dL_dw_prime = A.T @ b # (N*2 x P*2), (P*2 x 1) -> (N*2 x 1)
+        # ddelta_dw = dL_dw_prime.T @ ddelta_dweight # (1 x N*2), (E x N*2 x 1) = (E x 1 x 1)
+        # alpha_gradient = S.T @ (dL_da_w_prime + ddelta_dw[:, 0]) # (E,)
+        # new_alphas = get_edge_alphas(edges) - LR * alpha_gradient
+        # commit_weights(new_alphas, edges, nodes)
+
         # Record the solution, commit the solution to the nodes
         env.render2D(nodes)
         iters += 1
+    return
+
+def solveGD(start_node, goal_node, env, depth = 1):
+    # Find total number of paths
+    nodes, edges = construct_graph(depth, start_node, goal_node, env)
+    paths = search(start_node, goal_node)
+    # env.render3D(nodes)
+    node_count = len(nodes) - 2 # excludes start and goal. Remember to index from 1 and terminate before len - 1
+    path_count = len(paths)
+    edge_count = len(edges)
+
+    converged = False
+    max_iters = 200
+    LR = 1e-2
+    iters = 0
+    while not converged and iters < max_iters:
+        print(f"Optimization Iteration {iters}")
+        cost_ndim = path_count * 2
+        if len(env.obstacle_centers) == 0:
+            cost_ndim = path_count 
+        
+        A = np.zeros((cost_ndim, node_count * 2))
+        dAda = np.zeros((edge_count, cost_ndim, node_count * 2))
+        b = np.zeros((cost_ndim))
+        dbda = np.zeros((edge_count, cost_ndim))
+        path_costs = np.zeros((cost_ndim))
+
+        # dL/da - Jacobian of loss wrt weight parameter vector a
+        D = np.zeros((cost_ndim, edge_count))
+        e = np.zeros((cost_ndim,))
+    
+        node_positions = get_node_positions(nodes)
+        # Traverse each path
+        for p, path in enumerate(paths):
+            for i in range(len(path)):
+                edge = path[i]
+                start = edge.source
+                end = edge.dest
+                start_id = start.id
+                end_id = end.id
+                edge_id = edge.id
+                
+                obs_cost, J, leng, C = edge.getCost(env)
+
+                # Edge weight
+                alpha_i = edge.alpha
+                alpha = np.array(end.incoming_weights)
+                weight = stable_softmax(alpha_i, alpha)
+                edge.weight = weight
+
+                assert 0 <= weight and weight <= 1, f"Softmax weight incorrect: {weight}"
+                # J *= weight
+                # C *= weight
+                # obs_cost *= weight
+                # leng *= weight
+                dim_delta = 1
+                dim_step = 2
+                if len(env.obstacle_centers) == 0:
+                    dim_delta = 0
+                    dim_step = 1
+                if start_id >= 0:
+                    A[p * dim_step, start_id * 2: start_id * 2 + 2] +=  J[0, 2:] * weight
+                    A[p * dim_step + dim_delta, start_id * 2: start_id * 2 + 2] +=  C[0, 2:] * weight
+                    dAda[edge_id, p * dim_step, start_id * 2: start_id * 2 + 2] += J[0, 2:]
+                    dAda[edge_id, p * dim_step + dim_delta, start_id * 2: start_id * 2 + 2] += C[0, 2:]
+                if end_id >= 0:
+                    A[p * dim_step, end_id * 2: end_id * 2 + 2] +=  J[0, :2] * weight
+                    A[p * dim_step + dim_delta, end_id * 2: end_id * 2 + 2] +=  C[0, :2] * weight
+                    dAda[edge_id, p * dim_step, end_id * 2: end_id * 2 + 2] += J[0, :2]
+                    dAda[edge_id, p * dim_step + dim_delta, end_id * 2: end_id * 2 + 2] += C[0, :2]
+
+                print(f"Obs cost: {obs_cost}, Length: {leng}")
+                b[p * dim_step] += obs_cost * weight
+                b[p * dim_step + dim_delta] += leng * weight
+                dbda[edge_id, p * dim_step] += obs_cost
+                dbda[edge_id, p * dim_step + dim_delta] += leng
+
+                path_costs[p * dim_step] += obs_cost * weight
+                path_costs[p * dim_step + dim_delta] += leng * weight
+
+        # print(A)
+        print(f"ATb: {A.T @ b}")
+        # print(b)
+        
+        # Gradient Descent on the node positions
+        gradient = A.T @ b
+        new_positions = node_positions - LR * gradient
+        commit(new_positions, nodes)
+
+
+        # env.render2D(nodes)
+
+        # old_A = np.copy(A)
+        # old_b = np.copy(b)
+        # # Weight Parameter Optimization
+        # # Construct dloss/dweight
+        # for p, path in enumerate(paths):
+        #     for i in range(len(path)):
+        #         edge = path[i]
+        #         end = edge.dest
+        #         edge_id = edge.id
+        #         start_id = start.id
+        #         end_id = end.id
+                
+        #         obs_cost, J, leng, C = edge.getCost(env)
+
+        #         weight = edge.weight
+
+        #         assert 0 <= weight and weight <= 1, f"Softmax weight incorrect: {weight}"
+
+        #         if start_id >= 0:
+        #             A[p * 2, start_id * 2: start_id * 2 + 2] +=  J[0, 2:] * weight
+        #             A[p * 2 + 1, start_id * 2: start_id * 2 + 2] +=  C[0, 2:] * weight
+        #         if end_id >= 0:
+        #             A[p * 2, end_id * 2: end_id * 2 + 2] +=  J[0, :2] * weight
+        #             A[p * 2 + 1, end_id * 2: end_id * 2 + 2] +=  C[0, :2] * weight
+
+        #         b[p * 2] -= obs_cost * weight
+        #         b[p * 2 + 1] -= leng * weight
+
+        #         D[2 * p, edge_id] += obs_cost
+        #         D[2 * p + 1, edge_id] += leng
+                
+        #         e[2 * p] += obs_cost * weight
+        #         e[2 * p + 1] += leng * weight
+
+        # S = np.zeros((edge_count, edge_count))
+        
+        # # Construct dweight/dalpha AKA softmax Jacobian
+        # for node in nodes:
+        #     incoming_weights = node.incoming_weights
+        #     if len(incoming_weights) == 0:
+        #         continue
+        #     edge_ids = np.array([edge.id for edge in node.incoming])
+        #     softmax = stable_softmax(incoming_weights, incoming_weights)
+
+        #     ndim = softmax.shape[0]
+        #     softmax_matrix = np.tile(softmax, (ndim, 1))
+        #     dweight_da = softmax_matrix * (np.eye(ndim) - softmax_matrix.T)
+        #     r, c = np.meshgrid(edge_ids, edge_ids)
+        #     S[r, c] += dweight_da
+        
+        # LR = 1e-2
+        # # dloss/dweight * dweight/dalpha
+        # dL_da_w_prime = D.T @ e # E x 1
+
+        # dATA_da = dAda.transpose(0, 2, 1) @ old_A + old_A.T @ dAda # (E x N*2 x P*2), (P*2 x N*2) + (N*2 x P*2) (E x P*2 x N*2) = (E x N*2 x N*2)
+        # ATA = old_A.T @ old_A # (N*2 x N*2)
+        # ATA_inv = np.linalg.inv(ATA) # (N*2 x N*2)
+        # dATA_inv_da = -ATA_inv @ dATA_da @ ATA_inv # (N*2 x N*2), (E x N*2 x N*2), (N*2 x N*2) = (E x N*2 x N*2)
+        # ATb = old_A.T @ old_b # (N*2 x P*2), (P*2, 1) = (N*2 x 1)
+        # dAb_da = dAda.transpose(0, 2, 1) @ old_b + old_A.T @ np.expand_dims(dbda, axis = 2) # (E x N*2 x P*2), (P*2 x 1) + (N*2 x P*2), (E x P*2 x 1) = (E x N*2 x 1)
+        # ddelta_dweight = dATA_inv_da @ ATb + ATA @ dAb_da # (E x N*2 x N*2), (N*2 x 1) + (N*2 x N*2) (E x N*2 x 1) = (E x N*2 x 1)
+
+        # dL_dw_prime = A.T @ b # (N*2 x P*2), (P*2 x 1) -> (N*2 x 1)
+        # ddelta_dw = dL_dw_prime.T @ ddelta_dweight # (1 x N*2), (E x N*2 x 1) = (E x 1 x 1)
+        # alpha_gradient = S.T @ (dL_da_w_prime + ddelta_dw[:, 0]) # (E,)
+        # new_alphas = get_edge_alphas(edges) - LR * alpha_gradient
+        # commit_weights(new_alphas, edges, nodes)
+
+        # Record the solution, commit the solution to the nodes
+        iters += 1
+    env.render2D(nodes)
+
     return
 
 '''

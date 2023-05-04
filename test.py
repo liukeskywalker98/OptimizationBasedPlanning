@@ -29,6 +29,7 @@ visualization matplotlib (done)
 Try to differentiate wrt to the xs (done)
 Set up the A matrix (done)
 
+Add edge weight optimization
 Adjust math for non-zero radius obstacles
 Add support for kinodynamic paths (car curves)
 Scale up the problem in size, number of obstacles, number of dimensions
@@ -42,12 +43,12 @@ if __name__ == '__main__':
     np.seterr('ignore') # we will be dividing by zero a lot; suppress errors
     env = Env(2.5, 2.5, epsilon = 5000)
 
-    obs1 = RadialBarrierObstacle(1.5, 1.5, 1e-4) # 1/ x
-    obs2 = RadialBarrierObstacle(1.25, 1.25, weight=1e-4) 
+    obs1 = RadialBarrierObstacle(1.77, 1.23, 1e-4) # 1/ x
+    obs2 = RadialBarrierObstacle(1.26, 1.27, weight=1e-4) 
     env.add_obstacle(obs1)
     
     env.add_obstacle(obs2)
-    env.render2D()
+    # env.render2D()
     # env.render()
     test_integral()
 
@@ -56,4 +57,4 @@ if __name__ == '__main__':
     start_node = Node(1, 1)
     goal_node = Node(2, 2)
 
-    solve(start_node, goal_node, env, depth = 2)
+    solveGD(start_node, goal_node, env, depth = 1)
