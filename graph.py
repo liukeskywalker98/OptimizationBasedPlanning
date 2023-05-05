@@ -57,7 +57,7 @@ class Env():
 
         plt.show()
 
-    def render2D(self, nodes = None):
+    def render2D(self, iteration, nodes = None, path = []):
         fig, ax = plt.subplots()
         ax.set_xlim(0, self.x_bound)
         ax.set_ylim(0, self.y_bound)
@@ -66,17 +66,16 @@ class Env():
         if len(self.obstacle_centers):
             plt.scatter(obs[:, 0], obs[:, 1], c='b')
 
+        path = set(path)
+
         if nodes is not None:
             for node in nodes:
                 for outgoing in node.outgoing:
                     xs = np.linspace(node.coord[0, 0], outgoing.dest.coord[0,0], 100)
                     ys = np.linspace(node.coord[0,1], outgoing.dest.coord[0, 1], 100)
-                    # cost = np.zeros((100,))
+                   
                     line = np.stack((xs, ys)).T # 100 x 2
-                    
-                    # for obstacle in self.obstacle_centers:
-                        # line[:, 2] += obstacle.cost(line[:, :2])
-                    # line[:, 2][line[:, 2] > 100] = 100
+
                     edge_weight = outgoing.weight
                     line_weight = max(0.5, edge_weight * 5)
 
@@ -86,11 +85,17 @@ class Env():
                     label = f"{total_sq_cost:.03f}"#f"W: {edge_weight:.04f}, L:{env_cost:.04f} + C:{path_cost:.04f} = {total_sq_cost:.04f}"
                     ax.annotate(label, ((xs[-1] + xs[0])/2, (ys[-1] + ys[0])/2), textcoords = "offset points", xytext=(0,0), ha='center')
 
-                    ax.plot(line[:, 0], line[:, 1], 'r', linewidth= line_weight)
+                    # Color the final path (if applicable)
+                    if outgoing in path:
+                        color = 'g'
+                    else:
+                        color = 'r'
+                    ax.plot(line[:, 0], line[:, 1], color, linewidth= line_weight)
+        ax.set_title(f"Iteration {iteration}")
         ax.axis('equal')
         plt.show()
 
-    def init_animation2D(self, ax, nodes = None):
+    def init_animation2D(self, ax, iteration, nodes = None):
         
         self.ax = ax
         ax.set_xlim(0, self.x_bound)
@@ -119,10 +124,10 @@ class Env():
                     ax.annotate(label, ((xs[-1] + xs[0])/2, (ys[-1] + ys[0])/2), textcoords = "offset points", xytext=(0,0), ha='center')
 
                     self.ln = ax.plot(line[:, 0], line[:, 1], 'r', linewidth= line_weight)
-        
+        ax.set_title(f"Iteration {iteration}")
         return self.ln,
 
-    def update_animation2D(self, nodes, path = []):
+    def update_animation2D(self, nodes, iteration, path = []):
         self.ax.clear()
 
         self.ln = self.ax.plot([], [], 'r')
@@ -154,7 +159,7 @@ class Env():
                 else:
                     color = 'r'
                 self.ln = self.ax.plot(line[:, 0], line[:, 1], color, linewidth= line_weight)
-
+        self.ax.set_title(f"Iteration {iteration}")
         return self.ln, 
 class Node():
     def __init__(self, cx, cy, id = -1):

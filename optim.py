@@ -15,7 +15,7 @@ import copy
 from cost import *
 from graph import *
 
-RECORD = True
+RECORD = False
 VISUAL = True
 def test_integral():
     obs1 = RadialBarrierObstacle(1.5, 1.5)
@@ -303,7 +303,7 @@ def solve(start_node, goal_node, env, depth = 1):
         # commit_weights(new_alphas, edges, nodes)
 
         # Record the solution, commit the solution to the nodes
-        env.render2D(nodes)
+        env.render2D(iters, nodes)
         iters += 1
     return
 
@@ -319,7 +319,7 @@ def solveGD(start_node, goal_node, env, depth = 1):
     converged = False
     max_iters = 300
     LR = 1e-2
-    ALPHA_LR = 3e-1
+    ALPHA_LR = 1e-1
     iters = 0
 
     # Initialize all edge weights
@@ -333,9 +333,12 @@ def solveGD(start_node, goal_node, env, depth = 1):
     # Animation params
     if RECORD:
         fig, ax = plt.subplots()
-        env.init_animation2D(ax, nodes)
+        env.init_animation2D(ax, 0, nodes)
         moviewriter = anim.FFMpegWriter()
         moviewriter.setup(fig, "optim_movie.gif", dpi=100)
+
+    # path = pick_path(goal_node, start_node)
+    env.render2D(iters, nodes)
 
     while not converged and iters < max_iters:
         print(f"Optimization Iteration {iters}")
@@ -390,7 +393,7 @@ def solveGD(start_node, goal_node, env, depth = 1):
         new_positions = node_positions - LR * gradient
         commit(new_positions, nodes)
 
-        # env.render2D(nodes)
+        # env.render2D(iters, nodes)
 
         # Weight Parameter Optimization
         # Construct dloss/dweight
@@ -508,14 +511,17 @@ def solveGD(start_node, goal_node, env, depth = 1):
         iters += 1
         
         if RECORD:
-            env.update_animation2D(nodes)
+            path = pick_path(goal_node, start_node)
+            env.update_animation2D(nodes, iters, path)
             moviewriter.grab_frame()
         elif VISUAL:
-            env.render2D(nodes)
+            if not iters % 50:
+                path = pick_path(goal_node, start_node)
+                env.render2D(iters, nodes, path)
     
     path = pick_path(goal_node, start_node)
     if RECORD:
-        env.update_animation2D(nodes, path)
+        env.update_animation2D(nodes, iters, path)
         for _ in range(15):
             moviewriter.grab_frame()
 
