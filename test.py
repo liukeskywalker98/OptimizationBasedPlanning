@@ -43,11 +43,13 @@ if __name__ == '__main__':
     np.seterr('ignore') # we will be dividing by zero a lot; suppress errors
     env = Env(2.5, 2.5, epsilon = 5000)
 
-    obs1 = RadialBarrierObstacle(1.77, 1.23, 1e-4) # 1/ x
-    obs2 = RadialBarrierObstacle(1.26, 1.27, weight=1e-4) 
+    obs1 = RadialBarrierObstacle(1.77, 1.23, 1e-3) # 1/ x
     env.add_obstacle(obs1)
-    
+
+    obs2 = RadialBarrierObstacle(1.26, 1.27, weight=1e-3)     
     env.add_obstacle(obs2)
+    obs3 = RadialBarrierObstacle(1.3, 1.8, weight=1e-3)     
+    env.add_obstacle(obs3)
     # env.render2D()
     # env.render()
     test_integral()
@@ -57,4 +59,4 @@ if __name__ == '__main__':
     start_node = Node(1, 1)
     goal_node = Node(2, 2)
 
-    solveGD(start_node, goal_node, env, depth = 1)
+    solveGD(start_node, goal_node, env, depth = 4)

@@ -61,29 +61,10 @@ class Env():
         fig, ax = plt.subplots()
         ax.set_xlim(0, self.x_bound)
         ax.set_ylim(0, self.y_bound)
-        X = np.linspace(0, self.x_bound, self.epsilon, endpoint = False)
-        Y = np.linspace(0, self.y_bound, self.epsilon, endpoint = False)
 
-        X, Y = np.meshgrid(X, Y)
-        # Z = np.zeros(X.shape)
-
-        # Add the cost from all obstacles
-        # coords = np.stack((X, Y)).transpose(1, 2, 0) # 2 x H x W
-        # for obstacle in self.obstacle_centers:
-        #     Z += obstacle.cost(coords)
         obs = np.array([obstacle.center for obstacle in self.obstacle_centers]) # N x 2
         if len(self.obstacle_centers):
             plt.scatter(obs[:, 0], obs[:, 1], c='b')
-
-        # Clip infinities so that plt does not squash smaller values
-        # inf = np.isinf(Z)
-        # too_big = Z > INF
-        # clip_index = np.logical_or(inf, too_big)
-
-        # Z[clip_index] = INF
-
-        # surf = ax.plot_surface(X, Y, Z, zorder = 1)
-        # fig.colorbar(surf, shrink=0.5, aspect=5)
 
         if nodes is not None:
             for node in nodes:
@@ -99,16 +80,82 @@ class Env():
                     edge_weight = outgoing.weight
                     line_weight = max(0.5, edge_weight * 5)
 
-                    env_cost, _, path_cost, _ = outgoing.getCost(self)
-                    total_sq_cost = env_cost**2 + path_cost**2
+                    env_cost, path_cost = outgoing.getCost(self)
+                    total_sq_cost = env_cost + path_cost
                     # print(total_sq_cost.shape)
-                    label = f"{edge_weight:.04f}, {total_sq_cost:.04f}"
+                    label = f"{total_sq_cost:.03f}"#f"W: {edge_weight:.04f}, L:{env_cost:.04f} + C:{path_cost:.04f} = {total_sq_cost:.04f}"
                     ax.annotate(label, ((xs[-1] + xs[0])/2, (ys[-1] + ys[0])/2), textcoords = "offset points", xytext=(0,0), ha='center')
 
                     ax.plot(line[:, 0], line[:, 1], 'r', linewidth= line_weight)
         ax.axis('equal')
-        plt.show() 
+        plt.show()
 
+    def init_animation2D(self, ax, nodes = None):
+        
+        self.ax = ax
+        ax.set_xlim(0, self.x_bound)
+        ax.set_ylim(0, self.y_bound)
+
+        self.ln = ax.plot([], [], 'r')
+        obs = np.array([obstacle.center for obstacle in self.obstacle_centers]) # N x 2
+        if len(self.obstacle_centers):
+            self.ln = ax.scatter(obs[:, 0], obs[:, 1], c='b')
+        ax.axis('equal')
+        if nodes is not None:
+            for node in nodes:
+                for outgoing in node.outgoing:
+                    xs = np.linspace(node.coord[0, 0], outgoing.dest.coord[0,0], 100)
+                    ys = np.linspace(node.coord[0,1], outgoing.dest.coord[0, 1], 100)
+                    # cost = np.zeros((100,))
+                    line = np.stack((xs, ys)).T # 100 x 2
+
+                    edge_weight = outgoing.weight
+                    line_weight = max(0.5, edge_weight * 5)
+
+                    env_cost, path_cost = outgoing.getCost(self)
+                    total_sq_cost = env_cost + path_cost
+                    # print(total_sq_cost.shape)
+                    label = f"{edge_weight:.03f}, {total_sq_cost:.03f}"
+                    ax.annotate(label, ((xs[-1] + xs[0])/2, (ys[-1] + ys[0])/2), textcoords = "offset points", xytext=(0,0), ha='center')
+
+                    self.ln = ax.plot(line[:, 0], line[:, 1], 'r', linewidth= line_weight)
+        
+        return self.ln,
+
+    def update_animation2D(self, nodes, path = []):
+        self.ax.clear()
+
+        self.ln = self.ax.plot([], [], 'r')
+        obs = np.array([obstacle.center for obstacle in self.obstacle_centers]) # N x 2
+        if len(self.obstacle_centers):
+            self.ln = self.ax.scatter(obs[:, 0], obs[:, 1], c='b')
+        
+        path = set(path)
+
+        for node in nodes:
+            for outgoing in node.outgoing:
+                xs = np.linspace(node.coord[0, 0], outgoing.dest.coord[0,0], 100)
+                ys = np.linspace(node.coord[0,1], outgoing.dest.coord[0, 1], 100)
+                # cost = np.zeros((100,))
+                line = np.stack((xs, ys)).T # 100 x 2
+                
+                edge_weight = outgoing.weight
+                line_weight = max(0.5, edge_weight * 5)
+
+                env_cost, path_cost = outgoing.getCost(self)
+                total_sq_cost = env_cost + path_cost
+                # print(total_sq_cost.shape)
+                label = f"{edge_weight:.03f}, {total_sq_cost:.03f}"
+                self.ax.annotate(label, ((xs[-1] + xs[0])/2, (ys[-1] + ys[0])/2), textcoords = "offset points", xytext=(0,0), ha='center')
+
+                # Color the final path (if applicable)
+                if outgoing in path:
+                    color = 'g'
+                else:
+                    color = 'r'
+                self.ln = self.ax.plot(line[:, 0], line[:, 1], color, linewidth= line_weight)
+
+        return self.ln, 
 class Node():
     def __init__(self, cx, cy, id = -1):
         self.coord = np.array([[cx, cy]])
@@ -146,23 +193,31 @@ class Edge():
         
         return length
     
-    def getCost(self, env):
+    def getCost(self, env, jacobians = False):
         start = self.source.coord
         end = self.dest.coord
         s = np.concatenate((end, start), axis = 1)
         J = np.zeros((1, 4))
         obs_cost = 0
         for obstacle in env.obstacle_centers:
-            integral, L = obstacle.integral(start, end, True)
+            if jacobians:
+                integral, L = obstacle.integral(start, end, jacobians)
+                J += L
+            else:
+                integral = obstacle.integral(start, end, jacobians)
             # system is L(x_2, x_1) ~= L([x2, x1] - [x20, x10]) + integral 
             # = L[x2, x1] + integral - L[x20, x10] 
             obs_cost += integral[0,0]
-            J += L
-            # system is aw
 
-        leng, C = self.length_cost(True)
+        if jacobians:
+            leng, C = self.length_cost(jacobians)
+        else:
+            leng = self.length_cost(jacobians)
 
-        return obs_cost, J, leng, C
+        if jacobians:
+            return obs_cost, J, leng, C
+        else:
+            return obs_cost, leng
 
 '''
 Constructs a directed acyclic graph from start to end
@@ -208,7 +263,7 @@ def construct_graph(depth, start_node, goal_node, env):
                 edge = Edge(node, old_left, len(edges))
                 old_left.add_incoming(edge)
                 node.add_outgoing(edge)
-                edges.append(left_edge)
+                edges.append(edge)
 
             # add right node
             right_coord = old_coord + right_vector
@@ -292,13 +347,27 @@ def search(start, goal):
             new_path.append(outgoing)
             # print(f"Destination is: {outgoing}")
             if outgoing.dest == goal:
-                print(len(new_path))
                 paths.append(new_path)
             else:
                 new_path.append(outgoing.dest)
                 frontier.append(new_path)
     return paths
 
+def pick_path(goal, start):
+    frontier = goal
+    path = []
+    while frontier != start:
+        best_index = np.argmax(np.array(frontier.incoming_weights))
+        best_edge = frontier.incoming[best_index]
+        path.append(best_edge)
+        best_predecessor = best_edge.source
+        frontier = best_predecessor
+
+    return path
+
+'''
+The following functions are utils for modifying the graph's parameters efficiently
+'''
 def commit(node_positions, nodes):
     assert node_positions.shape[0] == len(nodes) * 2 - 4
     for i in range(node_positions.shape[0] // 2):
