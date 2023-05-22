@@ -27,7 +27,7 @@ The graph construction stage is where we define all the paths through the enviro
 
 Our approach is to overlay a simple lattice over the environment. The graph expands out in a Pascal triangle-esque pyramid, then constracts onto the goal. The following graphic is a rough illustration of the resulting graph.
 
-![Lattice_Example](Problem Formulation.PNG)
+![Lattice_Example](Problem_Formulation.PNG)
 
 Any method that creates paths from the start to the goal will suffice here. For the optimization we only need to know each node position and common nodes between paths.
 
