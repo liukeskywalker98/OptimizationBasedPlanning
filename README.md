@@ -4,7 +4,7 @@ Authors: Kevin Liu, David Feng, Stephanie Wang
 
 This project is a planning algorithm in development. Traditional planning techniques for mobile robots and manipulators involve discretizing continuous space into a graph and running discrete graph search algorithms on that graph. This often forces a tradeoff between resolution and time/space complexity. While the graph search techniques guarantee optimality given this discretization, the discretization might only produce suboptimal paths with respect to the continuous space.
 
-Our proposed method formulates the planning problem as a 
+Our proposed method formulates the planning problem as an optimization problem. This method has the potential to return paths that are optimal in a continuous sense, while taking advantage of parallel computation. In future iterations, this method might be able to handle kinodynamic constraints for problems involving non-holonomic robots.
 
 ## Problem Formulation
 The first contribution of this algorithm is to construct the graph in continuous space and define the planning problem as a continuous optimization problem. At this stage of development, we are solving a two-dimensional problem. Our obstacles are defined as positive cost functions, and edges are lines through 2D space.
