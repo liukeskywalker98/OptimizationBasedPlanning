@@ -48,7 +48,6 @@ class RadialBarrierObstacle():
         d = to_center[:, 1:] # y distance from start point to the center
         # print(f"dx: {a}, dy: {c}, dcx: {b}, dcy: {d}")
 
-
         e = a ** 2 + c ** 2 # N x 1
         f = 2* (a * b + c * d) # N x 1
         g = b ** 2 + d ** 2 # N x 1
@@ -59,7 +58,6 @@ class RadialBarrierObstacle():
 
         sqrt_e = np.sqrt(e) # N x 1
         determinant = 4 * e * g - f ** 2 # N x 1
-        # print(f"Determinant: {determinant}")
         B = np.sqrt(determinant) # N x 1
         C = (2 * e + f) / B # N x 1
         D = f / B

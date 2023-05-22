@@ -48,8 +48,10 @@ if __name__ == '__main__':
 
     obs2 = RadialBarrierObstacle(1.26, 1.27, weight=1e-3)     
     env.add_obstacle(obs2)
+    
     obs3 = RadialBarrierObstacle(1.3, 1.8, weight=1e-3)     
     env.add_obstacle(obs3)
+
     # env.render2D()
     # env.render()
     test_integral()

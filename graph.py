@@ -81,7 +81,6 @@ class Env():
 
                     env_cost, path_cost = outgoing.getCost(self)
                     total_sq_cost = env_cost + path_cost
-                    # print(total_sq_cost.shape)
                     label = f"{total_sq_cost:.03f}"#f"W: {edge_weight:.04f}, L:{env_cost:.04f} + C:{path_cost:.04f} = {total_sq_cost:.04f}"
                     ax.annotate(label, ((xs[-1] + xs[0])/2, (ys[-1] + ys[0])/2), textcoords = "offset points", xytext=(0,0), ha='center')
 
@@ -111,7 +110,6 @@ class Env():
                 for outgoing in node.outgoing:
                     xs = np.linspace(node.coord[0, 0], outgoing.dest.coord[0,0], 100)
                     ys = np.linspace(node.coord[0,1], outgoing.dest.coord[0, 1], 100)
-                    # cost = np.zeros((100,))
                     line = np.stack((xs, ys)).T # 100 x 2
 
                     edge_weight = outgoing.weight
@@ -119,7 +117,6 @@ class Env():
 
                     env_cost, path_cost = outgoing.getCost(self)
                     total_sq_cost = env_cost + path_cost
-                    # print(total_sq_cost.shape)
                     label = f"{edge_weight:.03f}, {total_sq_cost:.03f}"
                     ax.annotate(label, ((xs[-1] + xs[0])/2, (ys[-1] + ys[0])/2), textcoords = "offset points", xytext=(0,0), ha='center')
 
@@ -141,7 +138,6 @@ class Env():
             for outgoing in node.outgoing:
                 xs = np.linspace(node.coord[0, 0], outgoing.dest.coord[0,0], 100)
                 ys = np.linspace(node.coord[0,1], outgoing.dest.coord[0, 1], 100)
-                # cost = np.zeros((100,))
                 line = np.stack((xs, ys)).T # 100 x 2
                 
                 edge_weight = outgoing.weight
@@ -149,7 +145,6 @@ class Env():
 
                 env_cost, path_cost = outgoing.getCost(self)
                 total_sq_cost = env_cost + path_cost
-                # print(total_sq_cost.shape)
                 label = f"{edge_weight:.03f}, {total_sq_cost:.03f}"
                 self.ax.annotate(label, ((xs[-1] + xs[0])/2, (ys[-1] + ys[0])/2), textcoords = "offset points", xytext=(0,0), ha='center')
 

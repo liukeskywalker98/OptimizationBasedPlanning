@@ -3,10 +3,6 @@ optim.py
 Optimization code
 Runs Levenberg-Marquadt on a least squares problem for the total environmental 
 and travel cost for all paths
-
-TODO:
-add in edge weights for edge optimization
-add in edge weight optimization
 '''
 import matplotlib.pyplot as plt
 import matplotlib.animation as anim
@@ -28,12 +24,9 @@ def test_integral():
     xs = np.linspace(start[0, 0], end[0, 0], samples, endpoint = False)
     ys = np.linspace(start[0, 1], end[0, 1], samples, endpoint = False)
     delta = np.linalg.norm(start - end, axis = -1) / samples
-    # print(delta)
     coords = np.stack((xs, ys)).T # N x 2
 
     point_costs = obs1.cost(coords)
-    # print(point_costs)
-    # print(np.amax(point_costs))
     numerical = np.sum(point_costs * delta)
     exact = obs1.integral(start, end)
     print("Comparing results of integration of cost function:")
@@ -99,8 +92,6 @@ def levenberg_marquadt(node_positions, A, b, nodes, paths, env, path_costs):
         dx = LM_inv @ ATb
 
         # Check convergence
-        # print(node_positions)
-        # print(dx)
         commit(node_positions + dx, nodes)
         new_path_costs = np.zeros((path_count * 2))
         # Traverse each path
@@ -133,7 +124,7 @@ def weight_GD():
 '''
 USED FOR TESTING ONLY
 Minimize the travel cost and environmental cost for all paths in a least square
-sense. 
+sense. Uses Levenberg-Marquadt.
 
 Use solveGD instead.
 
@@ -227,13 +218,10 @@ def solve(start_node, goal_node, env, depth = 1):
                 path_costs[p * dim_step + dim_delta] += leng * weight
 
         print("Least squares problem constructed:")
-        # print(A)
-        # print(f"ATA: {A.T @ A}")
-        print(f"ATb: {A.T @ b}")
-        # print(b)
         converged = levenberg_marquadt(node_positions, A, b, nodes, paths, env, path_costs)
         # env.render2D(nodes)
 
+        # The following code must be fixed to actually differentiate wrt LM A
         # old_A = np.copy(A)
         # old_b = np.copy(b)
         # # Weight Parameter Optimization
@@ -311,7 +299,6 @@ def solveGD(start_node, goal_node, env, depth = 1):
     # Find total number of paths
     nodes, edges = construct_graph(depth, start_node, goal_node, env)
     paths = search(start_node, goal_node)
-    # env.render3D(nodes)
     node_count = len(nodes) - 2 # excludes start and goal. Remember to index from 1 and terminate before len - 1
     path_count = len(paths)
     edge_count = len(edges)
@@ -380,13 +367,8 @@ def solveGD(start_node, goal_node, env, depth = 1):
                     A[p * dim_step, end_id * 2: end_id * 2 + 2] +=  J[0, :2] * weight
                     A[p * dim_step + dim_delta, end_id * 2: end_id * 2 + 2] +=  C[0, :2] * weight
 
-                # print(f"Obs cost: {obs_cost}, Length: {leng}")
                 b[p * dim_step] += obs_cost * weight
                 b[p * dim_step + dim_delta] += leng * weight
-
-        # print(A)
-        # print(f"ATb: {A.T @ b}")
-        # print(b)
         
         # Gradient Descent on the node positions
         gradient = A.T @ b / np.linalg.norm(b)
